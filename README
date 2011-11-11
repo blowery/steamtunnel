@@ -1,2 +1,38 @@
 STOLEN FROM PHIGGINS
 https://gist.github.com/1358218
+
+# steamtunnel - simple SSH tunnel management
+
+usage: steamtunnel [options] [command]
+
+options:
+    
+    -q              quiet. suppress console output.
+    -c [filename]   use [filename] as config. defaults to look for ~/.tunnelrc
+
+commands:
+    
+    list            list available tunnel configs
+    start [name?]   start a tunnel (or tunnels). if no [name] start all tunnels.
+    stop [name?]    stop a tunnel (or tunnels). if no [name] stop all tunnels.
+
+example:
+
+    $ steamtunnel -c /etc/tunnels.conf -q start &
+    
+example config:
+
+    {
+        tunnels:[
+            {
+                // same as: ssh -L 12345:localhost:80 example.com -N
+                description: "Some Text About this Tunnel",
+                name:"foo", // the name for start/stop/list
+                local: 12345, // local port to listen on
+                host: "localhost", // host to direct to
+                remote: 80, // remote port to connect to
+                connect: "example.com" // ssh server to do connect to
+            }
+        ]
+
+    }
