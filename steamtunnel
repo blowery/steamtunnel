@@ -1,0 +1,195 @@
+#!/usr/bin/env node
+
+/*
+    steamtunnel - simple SSH tunnel management
+    
+    usage: steamtunnel [options] [command]
+    
+    options:
+        
+        -q              quiet. suppress console output.
+        -c [filename]   use [filename] as config. defaults to look for ~/.tunnelrc
+
+    commands:
+        
+        list            list available tunnel configs
+        start [name?]   start a tunnel (or tunnels). if no [name] start all tunnels.
+        stop [name?]    stop a tunnel (or tunnels). if no [name] stop all tunnels.
+
+    example:
+    
+        $ steamtunnel -c /etc/tunnels.conf -q start &
+        
+    example config:
+    
+    {
+        tunnels:[
+            {
+                // same as: ssh -L 12345:localhost:80 example.com -N
+                description: "Some Text About this Tunnel",
+                name:"foo", // the name for start/stop/list
+                local: 12345, // local port to listen on
+                host: "localhost", // host to direct to
+                remote: 80, // remote port to connect to
+                connect: "example.com" // ssh server to do connect to
+            }
+        ]
+    
+    }
+*/
+
+var fs = require("fs"),
+    spawn = require("child_process").spawn,
+
+    // some doc somewhere claims this exists
+    // fork = require("child_process").fork,    
+    // ugh = console.log(fork),
+    
+    path = require("path"),
+    
+    cmdline = process.argv.join(" "),
+    home = process.env.HOME,
+    files = [home + "/.tunnelrc"],
+    c = cmdline.match(/-c\s+(.*)\s+?/),
+    verbose = !(~cmdline.indexOf("-q"))
+;
+
+// handle -c {configfile} from cmdnline
+if(c && c[1]){
+    var cfg = c[1];
+    if(cfg.charAt(0) == "."){
+        cfg = process.cwd() + "/" + cfg;
+    }
+    files = [path.resolve(cfg)];
+}
+
+function loadconfig(){
+    
+    var cfg = {}, found = files.map(function(file){
+
+        var exists;
+        try{
+            exists = fs.statSync(file);
+        }catch(e){
+            return false;
+        }
+
+        return exists && fs.readFileSync(file, "utf8");
+
+    }).filter(function(item){ return item; });
+
+    if(found.length){
+        found.map(function(conf){
+            try{
+                var data = eval("(" + conf + ")");
+            }catch(e){
+                return false;
+            }
+            return data;
+        }).forEach(function(data){
+            if(data){ 
+                for(var i in data){
+                    cfg[i] = data[i];
+                }
+            }
+        });
+    }else{
+        return false;
+    }
+    
+    return cfg;
+}
+
+var lockfile_base = "/tmp/steamtunnel-"
+
+function setLock(tunnel){
+    // setup a lockfile for the proc.pid
+}
+
+function clearLock(tunnel){
+    // clear a lockfile for proc.pid
+}
+
+function checkLock(tunnel){
+    // look if we had a .pid file this tunnel? 
+    return false;
+}
+
+function start_tunnel(tunnel, persists, delay){
+
+    var args = ["-L", [tunnel.local, tunnel.host, tunnel.remote].join(":"), tunnel.connect, "-N"],
+        proc = tunnel.proc = spawn("ssh", args)
+    ;
+
+    setLock(tunnel);
+    delay = delay || 0;
+
+    verbose && console.log('started', tunnel.name, proc.pid);    
+
+    if(persists){
+        proc.on("exit", function(){
+            clearLock(tunnel);
+            verbose && console.log("exited", tunnel.name);
+            setTimeout(function(){
+                proc = tunnel.proc = start_tunnel(tunnel, persists, delay + 1000);
+                setLock(tunnel);
+            }, delay);
+        });
+    }
+    
+    return proc;
+}
+
+var config = loadconfig();
+if(config && config.tunnels){
+
+    if(~cmdline.indexOf("start")){
+
+        var starting, which = cmdline.match(/start\s+(.*)?/);
+        if(which && which[1]){
+            starting = config.tunnels.filter(function(tunnel){
+                return tunnel.name == which[1];
+            })
+        }else{
+            starting = config.tunnels.map(function(tunnel){
+               if(!tunnel.only_manual){ return tunnel; }
+            }).filter(function(item){ return item; });
+        }
+        
+        starting.forEach(function(tunnel){
+            start_tunnel(tunnel, true);
+        });
+        
+    }else if(~cmdline.indexOf("stop")){
+
+        var stopping, whichs = cmdline.match(/stop\s+(.*)?/);
+        if(whichs && whichs[1]){
+            stopping = config.tunnels.filter(function(tunnel){
+                return tunnel.name == which[1];
+            });
+        }else{
+            stopping = config.tunnels;
+        }
+        
+        stopping.forEach(function(tunnel){
+            if(tunnel.proc){
+                clearLock(tunnel.proc);
+                tunnel.proc.kill("SIGHUP");
+            }
+        });
+        
+    }else if(~cmdline.indexOf("list")){
+
+        console.log("tunnels:");
+        config.tunnels.forEach(function(tunnel, i){
+            var running = checkLock(tunnel);
+            console.log(i + "\t" + (running ? "*" : "") + tunnel.name + (tunnel.description ? "\t" + tunnel.description : ""));
+        });
+
+    }else{
+        console.log("no command?");
+    }
+    
+}else{
+    console.log("no config found");
+}
